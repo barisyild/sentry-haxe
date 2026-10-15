@@ -1,0 +1,7 @@
+build/
+.haxelib/
+.DS_Store
+*.zip
+native/java/build/
+__pycache__/
+*.py[cod]

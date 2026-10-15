@@ -1,0 +1,5 @@
+-cp src
+-main sentry.internal.hang.WorkerMain
+-swf build/sentry-hang-worker.swf
+-swf-version 11.4
+-dce full

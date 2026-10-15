@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<project>
+    <meta title="Sentry Haxe Example" package="example.sentryhaxe" version="1.0.0" />
+    <app main="Main" path="../build/example" />
+    <source path="." />
+    <haxelib name="sentry-haxe" path=".." />
+</project>

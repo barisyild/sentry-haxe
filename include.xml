@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<project>
+    <section if="android" unless="flash || sentry_portable">
+        <dependency name="sentry-haxe" path="native" />
+    </section>
+</project>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<application xmlns="http://ns.adobe.com/air/application/51.0">
+    <id>io.sentry.haxe.hang.tests</id>
+    <versionNumber>1.0.0</versionNumber>
+    <filename>SentryHaxeHangTests</filename>
+    <initialWindow>
+        <content>air-hangs.swf</content><visible>false</visible><width>100</width><height>100</height>
+    </initialWindow>
+    <supportedProfiles>desktop extendedDesktop</supportedProfiles>
+</application>

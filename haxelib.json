@@ -1,0 +1,12 @@
+{
+  "name": "sentry-haxe",
+  "url": "https://github.com/barisyild/sentry-haxe",
+  "license": "MIT",
+  "tags": ["sentry", "crash-reporting", "cross", "openfl"],
+  "description": "A shared Haxe error-reporting API backed by official Sentry SDKs and an envelope transport for Flash/AIR and TeaVM.",
+  "version": "0.1.0",
+  "classPath": "src",
+  "releasenote": "Error reporting, native SDK adapters, Flash/AIR envelopes, Worker hang detection and an external desktop watchdog.",
+  "contributors": ["barisyild"],
+  "dependencies": {}
+}

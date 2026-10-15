@@ -1,0 +1,5 @@
+-cp src
+-cp tools/watchdog
+-main Watchdog
+-js build/sentry-watchdog.cjs
+-dce full
