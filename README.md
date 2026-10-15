@@ -16,6 +16,14 @@ Unofficial cross-platform Haxe error-reporting library. One `sentry.Sentry` API 
 
 ## Install
 
+Install from the public Git repository, including in CI:
+
+```sh
+haxelib git sentry-haxe https://github.com/barisyild/sentry-haxe.git main --always
+```
+
+For local development, register your checkout instead:
+
 ```sh
 haxelib dev sentry-haxe /absolute/path/to/sentry-haxe
 ```
@@ -25,6 +33,8 @@ Use `-lib sentry-haxe`, or add this to a Lime/OpenFL project:
 ```xml
 <haxelib name="sentry-haxe" />
 ```
+
+Haxelib supplies the source classpath and initialization macro; no project-relative `path` or manual `-cp` is needed. Build tools can locate the package root with `haxelib libpath sentry-haxe`. In CI, install after restoring any haxelib cache so the requested Git branch is refreshed on every run.
 
 The package includes `haxelib.json`, `extraParams.hxml` and `include.xml`. No SDK downloads run from compiler macros. Native SDKs are application build dependencies, not bundled binaries.
 

@@ -1,7 +1,14 @@
 import sentry.Sentry;
 import sentry.Attachment;
 
-class Main {
+class Main #if lime extends lime.app.Application #end {
+    #if lime
+    public function new() {
+        super();
+        main();
+    }
+    #end
+
     static function main():Void {
         // Supply your project's public DSN. Empty DSN intentionally disables reporting.
         Sentry.init({
