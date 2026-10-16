@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<application xmlns="http://ns.adobe.com/air/application/51.0">
+    <id>io.sentry.haxe.exception.tests</id>
+    <versionNumber>1.0.0</versionNumber>
+    <filename>SentryHaxeExceptionTests</filename>
+    <initialWindow>
+        <content>air-exceptions.swf</content><visible>false</visible><width>100</width><height>100</height>
+    </initialWindow>
+    <supportedProfiles>desktop</supportedProfiles>
+</application>

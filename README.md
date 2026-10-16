@@ -150,6 +150,36 @@ This listener does not call `preventDefault`. Browser SDKs already install globa
 
 `flush`/`close` callbacks are asynchronous on browser/portable backends; native calls can block for the timeout. Java and Cocoa expose void flush APIs: `true` means their flush call returned, not that delivery was confirmed. Native C and JS expose their SDK completion result. Keep the application's event loop running until the close callback completes.
 
+### Obfuscated VM stack traces
+
+For AVM2 or other VM builds with a ProGuard-compatible name mapping, attach the
+UUID of the mapping uploaded to the same Sentry project:
+
+```haxe
+Sentry.init({
+    dsn: "https://public-key@sentry.example.com/42",
+    beforeSend: (event, hint) -> {
+        sentry.integrations.Proguard.apply(event, "1a876fc1-6ef9-4b93-9f35-11784da018ef");
+        return event;
+    }
+});
+```
+
+Generate a different UUID for each build and upload its mapping before shipping,
+for example with `sentry-cli upload-proguard --uuid <UUID> mapping.txt`. Mapping
+generation belongs to the application's obfuscation pipeline; this library does
+not embed mappings or upload credentials. Sentry requires mappings with method
+line information. Supply real compiler source positions, not invented ranges.
+
+`Proguard.apply` adds a `proguard` debug image and sets `platform: "java"` on named
+VM frames to select Sentry's ProGuard resolver. It preserves the event platform,
+runtime context, existing debug images and frames with a native/JavaScript
+platform. Flash errors are parsed into AVM2 class and method names, including
+Unicode identifiers and constructor frames. Source lines are retained when the
+runtime provides them. This adapter resolves structured stack frames; it does
+not rewrite arbitrary messages or breadcrumbs, recover stripped information, or
+create a blocked-thread stack for synthetic hang reports.
+
 ### Flash / AIR hang detection
 
 `FlashHangMonitor` is opt-in and watches the **main event loop**, not rendered FPS. It reports a synthetic `ApplicationHang` with the last filtered scope, breadcrumbs and game context. It cannot extract the blocked thread's stack trace, recover the application, or identify a GPU/driver failure from a missing heartbeat.

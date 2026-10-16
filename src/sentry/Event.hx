@@ -8,6 +8,9 @@ typedef Event = {
     var ?level:Level;
     var ?message:Dynamic;
     var ?exception:Dynamic;
+    var ?stacktrace:Dynamic;
+    var ?threads:Dynamic;
+    var ?debug_meta:Dynamic;
     var ?release:String;
     var ?environment:String;
     var ?dist:String;

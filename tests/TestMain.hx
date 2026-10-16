@@ -14,7 +14,7 @@ class TestMain {
         check(failed, message);
     }
     static function main():Void {
-        dsn(); protocol(); scope(); hooks(); queue(); rates(); errors(); lifecycle();
+        dsn(); protocol(); scope(); hooks(); queue(); rates(); errors(); symbols(); lifecycle();
         trace('PASS $assertions assertions');
     }
     static function dsn():Void {
@@ -177,5 +177,38 @@ class TestMain {
         pending.respond({status: 200});
         equal(2, closes, "Concurrent close callbacks complete once each");
         Sentry.init({enabled: false});
+    }
+
+    static function symbols():Void {
+        var frames = Exceptions.parseFlashStack("TypeError: Error #1009\n"
+            + "\tat §中§/§한§()[src/Game.hx:23]\n"
+            + "\tat example::Main$/start()[C:\\src\\Main.hx:9]\n"
+            + "\tat example::Main()\n\tat MethodInfo-42()\n");
+        equal(4, frames.length, "Parse AVM2 stack frames");
+        equal("§中§", frames[3].module, "Unicode class identifier preserved");
+        equal("§한§", Reflect.field(frames[3], "function"), "Separate AVM2 method");
+        equal(23, frames[3].lineno, "Actual Flash source line preserved");
+        equal("src/Game.hx", frames[3].filename, "Relative Flash source path");
+        equal("example.Main", frames[2].module, "Namespace and static class marker");
+        equal("C:\\src\\Main.hx", frames[2].filename, "Windows Flash source path");
+        equal("new", Reflect.field(frames[1], "function"), "Constructor frame");
+        equal(null, frames[0].module, "Anonymous method has no invented class");
+        equal(0, Exceptions.parseFlashStack(null).length, "Release player without a stack");
+        var uuid = "1a876fc1-6ef9-4b93-9f35-11784da018ef";
+        var native:Dynamic = {module: "native", "function": "fn", platform: "native"};
+        var event:Event = {platform: "other", exception: {values: [{stacktrace: {frames: frames}}]},
+            threads: {values: [{stacktrace: {frames: [native]}}]}, debug_meta: {images: [{type: "macho", debug_id: "original"}]}};
+        sentry.integrations.Proguard.apply(event, uuid);
+        sentry.integrations.Proguard.apply(event, uuid);
+        equal("other", event.platform, "Runtime event platform is unchanged");
+        equal("java", frames[3].platform, "Named VM frame selects ProGuard resolver");
+        equal("native", native.platform, "Do not override native symbolication");
+        equal(null, frames[0].platform, "Do not label anonymous frames as JVM");
+        equal(2, event.debug_meta.images.length, "Idempotent UUID metadata preserves other images");
+        equal(uuid, event.debug_meta.images[1].uuid, "Mapping UUID");
+        var hang:Event = {exception: {values: [{type: "AppHang"}]}};
+        sentry.integrations.Proguard.apply(hang, uuid);
+        equal(null, hang.debug_meta, "Synthetic hangs do not invent stack frames");
+        throws(function() sentry.integrations.Proguard.apply(event, "invalid"), "Reject invalid mapping UUID");
     }
 }

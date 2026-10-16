@@ -2,6 +2,21 @@
 
 Run all commands from the repository root. `sh tests/run.sh` executes the portable suite under the Haxe interpreter and Node, compiles Flash/AIR, and type-checks the examples. The suite covers DSN parsing, binary envelopes, Unicode, isolated scopes, exception chains, filtering, queue limits, rate limits, flushing and lifecycle races.
 
+## Flash exceptions and symbol metadata
+
+```sh
+haxe -cp src -cp tests -main FlashExceptionRuntimeTest -swf build/air-exceptions.swf -swf-version 32 -debug
+cp tests/air-exceptions.xml build/air-exceptions.xml
+ADL=/absolute/AIRSDK/bin/adl node tests/run-air-exceptions.cjs
+```
+
+This loopback-only AIR test exercises native Flash `Error` coercion, Haxe exception
+chains and scalar exceptions through the real transport. It checks actual AVM2
+class/method separation, debug source lines and ProGuard UUID metadata. The
+portable suite also covers Unicode identifiers, constructors, static methods,
+anonymous frames and preservation of existing native symbolication metadata.
+Sentry server-side mapping generation/upload is the consuming application's job.
+
 ## Hang detection
 
 `sh tests/run.sh` also executes `HangTest` in the interpreter and Node, builds the isolated worker and the external watchdog, and compiles monitor usage for Flash 11.1 and AIR. State-machine tests cover healthy pulses, stalled loops, one finalized event per episode, stable pending IDs and detection timestamps, estimated duration bounds, cooldowns, sampling, inactive periods, observer sleep/clock changes (including a fresh heartbeat arriving before the poll), recovery-only limits, snapshot revocation and privacy hooks.

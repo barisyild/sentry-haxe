@@ -7,7 +7,9 @@ class Exceptions {
     public static function event(error:Dynamic, handled = true):Event {
         var values:Array<Dynamic> = [];
         var seen:Array<Dynamic> = [];
-        var current = error;
+        // Keep this dynamic: assigning .previous below otherwise lets Haxe infer
+        // Exception, which AVM2 enforces even for a native flash.errors.Error.
+        var current:Dynamic = error;
         do {
             if (seen.indexOf(current) >= 0) break;
             seen.push(current);
@@ -34,7 +36,7 @@ class Exceptions {
                     var e:flash.errors.Error = cast current;
                     name = e.name;
                     message = e.message;
-                    frames = parseStack(e.getStackTrace());
+                    frames = parseFlashStack(e.getStackTrace());
                 }
                 #end
             }
@@ -83,6 +85,29 @@ class Exceptions {
             } else if (StringTools.startsWith(StringTools.trim(line), "at ")) {
                 result.unshift({"function": StringTools.trim(line).substr(3), in_app: true});
             }
+        }
+        return result;
+    }
+
+    /** AVM2 separates the class and method with '/', including on release players. */
+    public static function parseFlashStack(stack:String):Array<Dynamic> {
+        var result:Array<Dynamic> = [];
+        if (stack == null) return result;
+        var re = ~/^\s*at\s+([^\/\(]+?)\$?(?:\/([^\(]+))?\(\)(?:\[(.*):([0-9]+)\])?\s*$/;
+        for (line in stack.split("\n")) {
+            if (!re.match(line)) continue;
+            var module = re.matched(1).split("::").join(".");
+            var method = re.matched(2);
+            var frame:Dynamic = {module: module, "function": method == null ? "new" : method, in_app: true};
+            if (StringTools.startsWith(module, "MethodInfo-") && method == null) {
+                Reflect.deleteField(frame, "module");
+                Reflect.setField(frame, "function", module);
+            }
+            if (re.matched(3) != null) {
+                frame.filename = re.matched(3);
+                frame.lineno = Std.parseInt(re.matched(4));
+            }
+            result.unshift(frame);
         }
         return result;
     }
