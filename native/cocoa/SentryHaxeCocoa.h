@@ -104,16 +104,21 @@ inline SentryEvent *event(NSDictionary *data) {
     if (exceptions.count) result.exceptions = exceptions;
     return result;
 }
+inline NSUInteger &breadcrumb_limit() {
+    static NSUInteger limit = 100;
+    return limit;
+}
 inline void initialize(::String options) {
     @autoreleasepool {
         NSDictionary *data = json(options);
         [SentrySDK startWithConfigureOptions:^(SentryOptions *o) {
             o.dsn = field(data, @"dsn");
-            o.releaseName = field(data, @"release");
-            o.environment = field(data, @"environment");
-            o.dist = field(data, @"dist");
+            if (field(data, @"release")) o.releaseName = data[@"release"];
+            if (field(data, @"environment")) o.environment = data[@"environment"];
+            if (field(data, @"dist")) o.dist = data[@"dist"];
             o.debug = [data[@"debug"] boolValue];
             o.maxBreadcrumbs = [data[@"maxBreadcrumbs"] unsignedIntegerValue];
+            breadcrumb_limit() = o.maxBreadcrumbs;
             o.shutdownTimeInterval = [data[@"shutdownTimeoutMs"] doubleValue] / 1000.0;
             o.sampleRate = @1.0;
             NSDictionary *native = field(data, @"nativeOptions");
@@ -143,12 +148,36 @@ inline void initialize(::String options) {
 #endif
     }
 }
+inline NSArray<SentryBreadcrumb *> *serialized_breadcrumbs(NSArray *items) {
+    NSMutableArray *result = [NSMutableArray array];
+    NSISO8601DateFormatter *iso = owned([[NSISO8601DateFormatter alloc] init]);
+    iso.formatOptions = NSISO8601DateFormatWithInternetDateTime | NSISO8601DateFormatWithFractionalSeconds;
+    for (NSDictionary *item in items) {
+        if (![item isKindOfClass:[NSDictionary class]]) continue;
+        SentryBreadcrumb *b = owned([[SentryBreadcrumb alloc] initWithLevel:level(field(item, @"level")) category:field(item, @"category") ?: @"default"]);
+        b.message = field(item, @"message");
+        b.type = field(item, @"type");
+        b.data = field(item, @"data");
+        id timestamp = field(item, @"timestamp");
+        NSDate *date = [timestamp isKindOfClass:[NSString class]] ? [iso dateFromString:timestamp] : nil;
+        if (date) b.timestamp = date;
+        [result addObject:b];
+    }
+    return result;
+}
 inline ::String capture(::String eventJson, ::String attachmentsJson) {
     @autoreleasepool {
         SentryEvent *e = event(json(eventJson));
+        NSArray<SentryBreadcrumb *> *local = e.breadcrumbs;
+        e.breadcrumbs = nil;
         NSDictionary *attachments = json(attachmentsJson);
         SentryId *identifier = [SentrySDK captureEvent:e withScopeBlock:^(SentryScope *scope) {
-            [scope clear];
+            if (local.count) {
+                NSMutableArray<SentryBreadcrumb *> *merged = [NSMutableArray arrayWithArray:serialized_breadcrumbs([scope serialize][@"breadcrumbs"])];
+                [merged addObjectsFromArray:local];
+                NSUInteger limit = breadcrumb_limit();
+                e.breadcrumbs = merged.count > limit ? [merged subarrayWithRange:NSMakeRange(merged.count - limit, limit)] : merged;
+            }
             for (NSDictionary *a in attachments[@"items"]) {
                 NSData *bytes = owned([[NSData alloc] initWithBase64EncodedString:a[@"data"] options:0]);
                 [scope addAttachment:owned([[SentryAttachment alloc] initWithData:bytes filename:a[@"filename"] contentType:a[@"content_type"]])];
@@ -157,31 +186,126 @@ inline ::String capture(::String eventJson, ::String attachmentsJson) {
         return ::String(identifier.sentryIdString.UTF8String);
     }
 }
-inline void sync_scope(::String jsonScope) {
+inline NSString *text(::String value) {
+    const char *utf8 = value.utf8_str();
+    return utf8 ? [NSString stringWithUTF8String:utf8] : nil;
+}
+inline id value(::String jsonValue) {
+    NSString *wrapped = [NSString stringWithFormat:@"[%@]", text(jsonValue) ?: @"null"];
+    NSArray *items = [NSJSONSerialization JSONObjectWithData:[wrapped dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+    id result = items.count ? items[0] : nil;
+    return result == [NSNull null] ? nil : result;
+}
+inline NSMutableSet<NSString *> *managed(NSString *group) {
+    static NSMutableDictionary<NSString *, NSMutableSet<NSString *> *> *keys = [[NSMutableDictionary alloc] initWithDictionary:@{
+        @"tags": [NSMutableSet set], @"extra": [NSMutableSet set], @"contexts": [NSMutableSet set]}];
+    return keys[group];
+}
+inline void add_breadcrumb(::String breadcrumbJson) {
     @autoreleasepool {
-        NSDictionary *data = json(jsonScope);
-        // Only remove keys managed by this adapter; preserve SDK tracing/session metadata.
-        static NSDictionary *previous = @{};
+        NSDictionary *item = json(breadcrumbJson);
+        if (![item isKindOfClass:[NSDictionary class]]) return;
+        for (SentryBreadcrumb *b in breadcrumbs(@[item])) [SentrySDK addBreadcrumb:b];
+    }
+}
+inline void clear_breadcrumbs() {
+    @autoreleasepool { [SentrySDK configureScope:^(SentryScope *scope) { [scope clearBreadcrumbs]; }]; }
+}
+inline void set_tag(::String key, ::String tagValue) {
+    @autoreleasepool {
+        NSString *k = text(key), *v = text(tagValue);
+        if (!k || !v) return;
+        [managed(@"tags") addObject:k];
+        [SentrySDK configureScope:^(SentryScope *scope) { [scope setTagValue:v forKey:k]; }];
+    }
+}
+inline void remove_tag(::String key) {
+    @autoreleasepool {
+        NSString *k = text(key);
+        if (!k) return;
+        [managed(@"tags") removeObject:k];
+        [SentrySDK configureScope:^(SentryScope *scope) { [scope removeTagForKey:k]; }];
+    }
+}
+inline void set_extra(::String key, ::String extraJson) {
+    @autoreleasepool {
+        NSString *k = text(key);
+        if (!k) return;
+        id v = value(extraJson);
+        [managed(@"extra") addObject:k];
+        [SentrySDK configureScope:^(SentryScope *scope) { [scope setExtraValue:v forKey:k]; }];
+    }
+}
+inline void remove_extra(::String key) {
+    @autoreleasepool {
+        NSString *k = text(key);
+        if (!k) return;
+        [managed(@"extra") removeObject:k];
+        [SentrySDK configureScope:^(SentryScope *scope) { [scope removeExtraForKey:k]; }];
+    }
+}
+inline void remove_context(::String key) {
+    @autoreleasepool {
+        NSString *k = text(key);
+        if (!k) return;
+        [managed(@"contexts") removeObject:k];
+        [SentrySDK configureScope:^(SentryScope *scope) { [scope removeContextForKey:k]; }];
+    }
+}
+inline void set_context(::String key, ::String contextJson) {
+    @autoreleasepool {
+        NSString *k = text(key);
+        if (!k) return;
+        id v = value(contextJson);
+        if (!v) { remove_context(key); return; }
+        NSDictionary *context = [v isKindOfClass:[NSDictionary class]] ? v : @{@"value": v};
+        [managed(@"contexts") addObject:k];
+        [SentrySDK configureScope:^(SentryScope *scope) { [scope setContextValue:context forKey:k]; }];
+    }
+}
+inline void set_user(::String userJson) {
+    @autoreleasepool {
+        id data = value(userJson);
+        SentryUser *u = user([data isKindOfClass:[NSDictionary class]] ? data : nil);
+        [SentrySDK configureScope:^(SentryScope *scope) { [scope setUser:u]; }];
+    }
+}
+inline void set_level(::String levelJson) {
+    @autoreleasepool {
+        id v = value(levelJson);
+        SentryLevel l = [v isKindOfClass:[NSString class]] ? level(v) : kSentryLevelNone;
+        [SentrySDK configureScope:^(SentryScope *scope) { [scope setLevel:l]; }];
+    }
+}
+inline void set_environment(::String environmentJson) {
+    @autoreleasepool {
+        id v = value(environmentJson);
+        NSString *environment = [v isKindOfClass:[NSString class]] ? v : nil;
+        [SentrySDK configureScope:^(SentryScope *scope) { [scope setEnvironment:environment]; }];
+    }
+}
+inline void set_fingerprint(::String fingerprintJson) {
+    @autoreleasepool {
+        id v = value(fingerprintJson);
+        NSArray<NSString *> *fingerprint = [v isKindOfClass:[NSArray class]] ? v : nil;
+        [SentrySDK configureScope:^(SentryScope *scope) { [scope setFingerprint:fingerprint]; }];
+    }
+}
+inline void clear_scope() {
+    @autoreleasepool {
         [SentrySDK configureScope:^(SentryScope *scope) {
-            [scope setUser:user(field(data, @"user"))];
-            for (NSString *key in field(previous, @"tags")) [scope removeTagForKey:key];
-            for (NSString *key in field(previous, @"extra")) [scope removeExtraForKey:key];
-            for (NSString *key in field(previous, @"contexts")) [scope removeContextForKey:key];
-            for (NSString *key in field(data, @"tags")) [scope setTagValue:data[@"tags"][key] forKey:key];
-            for (NSString *key in field(data, @"extra")) [scope setExtraValue:data[@"extra"][key] forKey:key];
-            for (NSString *key in field(data, @"contexts")) [scope setContextValue:data[@"contexts"][key] forKey:key];
-            [scope setEnvironment:field(data, @"environment")];
-            [scope setFingerprint:field(data, @"fingerprint")];
-            [scope setLevel:field(data, @"level") ? level(data[@"level"]) : kSentryLevelNone];
+            for (NSString *k in managed(@"tags")) [scope removeTagForKey:k];
+            for (NSString *k in managed(@"extra")) [scope removeExtraForKey:k];
+            for (NSString *k in managed(@"contexts")) [scope removeContextForKey:k];
+            [scope setUser:nil];
+            [scope setEnvironment:nil];
+            [scope setFingerprint:nil];
+            [scope setLevel:kSentryLevelNone];
             [scope clearBreadcrumbs];
-            for (SentryBreadcrumb *b in breadcrumbs(field(data, @"breadcrumbs"))) [scope addBreadcrumb:b];
         }];
-#if __has_feature(objc_arc)
-        previous = data;
-#else
-        [previous release];
-        previous = [data copy];
-#endif
+        [managed(@"tags") removeAllObjects];
+        [managed(@"extra") removeAllObjects];
+        [managed(@"contexts") removeAllObjects];
     }
 }
 inline bool flush(int timeoutMs) { [SentrySDK flush:timeoutMs / 1000.0]; return true; }

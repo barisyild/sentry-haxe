@@ -4,6 +4,7 @@ import sentry.internal.Config;
 import sentry.internal.Values;
 import sentry.internal.Exceptions;
 import sentry.backend.Backend;
+import sentry.backend.NativeScope;
 
 /** A client and its synchronous scope stack belong to one application thread. */
 @:allow(sentry.integrations.FlashHangMonitor)
@@ -14,7 +15,9 @@ class Client {
     public var lastEventId(default, null):Null<String>;
     final config:Config;
     var backend:Backend;
+    var native = false;
     var processing = false;
+    var forwarded:Array<Breadcrumb> = [];
     var closeCallbacks:Array<Bool->Void> = [];
     var stopHangMonitor:(Void->Void)->Void;
 
@@ -22,12 +25,18 @@ class Client {
         config = new Config(options);
         scope = new Scope(config.maxBreadcrumbs, syncScope);
         if (!config.enabled) return;
-        backend = sentry.backend.BackendFactory.create(config);
+        attach(sentry.backend.BackendFactory.create(config));
+    }
+
+    function attach(backend:Backend):Void {
+        this.backend = backend;
+        native = Std.isOfType(backend, NativeScope);
+        if (native) scope = new Scope(config.maxBreadcrumbs, null, cast backend);
         enabled = true;
     }
 
     function syncScope():Void {
-        if (enabled) try backend.syncScope(scope) catch (e:Dynamic) config.report("Scope sync failed: " + Std.string(e));
+        if (enabled && !native) try backend.syncScope(scope) catch (e:Dynamic) config.report("Scope sync failed: " + Std.string(e));
     }
 
     public function withScope<T>(callback:Scope->T):T {
@@ -48,9 +57,10 @@ class Client {
     public function addBreadcrumb(breadcrumb:Breadcrumb):Void {
         if (!enabled || breadcrumb == null) return;
         try {
-            var b:Breadcrumb = Values.copy(breadcrumb);
-            if (config.options.beforeBreadcrumb != null) b = config.options.beforeBreadcrumb(b);
-            if (b != null) scope.addBreadcrumb(b);
+            var b:Breadcrumb = config.options.beforeBreadcrumb == null ? breadcrumb : config.options.beforeBreadcrumb(Values.copy(breadcrumb));
+            if (b == null) return;
+            if (processing && scope.isNative()) forwarded.push(breadcrumb);
+            scope.addBreadcrumb(b);
         } catch (e:Dynamic) config.report("beforeBreadcrumb failed: " + Std.string(e));
     }
 
@@ -67,11 +77,13 @@ class Client {
     public function captureEvent(event:Event, ?hint:Hint):Null<String> {
         if (!enabled || processing || event == null || config.sampleRate == 0 || Math.random() >= config.sampleRate) return null;
         processing = true;
+        forwarded = [];
         var id:Null<String> = null;
         try {
             if (hint == null) hint = {};
             var e = prepareEvent(event, hint);
             if (e != null) {
+                if (forwarded.length > 0 && e.breadcrumbs != null) e.breadcrumbs = [for (b in e.breadcrumbs) if (forwarded.indexOf(b) < 0) b];
                 var attachments = scope.getAttachments();
                 if (hint.attachments != null) attachments = attachments.concat(hint.attachments);
                 var size = 0;
@@ -82,6 +94,7 @@ class Client {
             }
         } catch (e:Dynamic) config.report("Capture failed: " + Std.string(e));
         processing = false;
+        forwarded = [];
         return id;
     }
 
@@ -90,9 +103,11 @@ class Client {
         if (e.event_id == null) e.event_id = Values.id();
         if (e.timestamp == null) e.timestamp = Values.now();
         if (e.platform == null) e.platform = "other";
-        if (e.release == null) e.release = config.options.release;
-        if (e.environment == null) e.environment = config.options.environment;
-        if (e.dist == null) e.dist = config.options.dist;
+        if (!native) {
+            if (e.release == null) e.release = config.options.release;
+            if (e.environment == null) e.environment = config.options.environment;
+            if (e.dist == null) e.dist = config.options.dist;
+        }
         var eventId = e.event_id;
         var timestamp = e.timestamp;
         if (config.options.beforeSend != null) e = config.options.beforeSend(e, hint);

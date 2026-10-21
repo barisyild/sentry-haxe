@@ -14,7 +14,7 @@ class TestMain {
         check(failed, message);
     }
     static function main():Void {
-        dsn(); protocol(); scope(); hooks(); queue(); rates(); errors(); symbols(); lifecycle();
+        dsn(); protocol(); scope(); nativeScope(); hooks(); queue(); rates(); errors(); symbols(); lifecycle();
         trace('PASS $assertions assertions');
     }
     static function dsn():Void {
@@ -76,6 +76,51 @@ class TestMain {
         c.scope.setUser(null); c.scope.removeTag("room");
         c.captureMessage("logout");
         check(t.event(3).user == null && !Reflect.hasField(t.event(3).tags, "room"), "Clear user and tag");
+        c.close();
+    }
+    static function nativeScope():Void {
+        var n = new NativeRecorder();
+        var c:Client = null;
+        c = new Client({dsn: "https://key@example.com/1", transport: new MemoryTransport(), release: "game@1", environment: "test", maxBreadcrumbs: 2,
+            beforeSend: function(event, hint) {
+                var crumb:Breadcrumb = {category: "exception", message: "stack"};
+                c.addBreadcrumb(crumb);
+                event.breadcrumbs.push(crumb);
+                return event;
+            }});
+        @:privateAccess c.attach(n);
+        check(c.scope.isNative(), "Platform scope owns the global scope");
+        c.scope.setTag("room", "outside");
+        c.scope.setUser({id: "42"});
+        c.scope.setEnvironment("turkey");
+        for (i in 0...5) c.addBreadcrumb({message: "b" + i, data: {i: i}});
+        equal(5, n.count("addBreadcrumb"), "Each breadcrumb forwarded once");
+        equal(0, n.count("clearBreadcrumbs") + n.count("syncScope"), "No scope resync");
+        equal(null, c.scope.snapshot().breadcrumbs, "Haxe keeps no breadcrumb copy");
+        equal("outside", n.tags.room, "Tag forwarded");
+        c.captureMessage("outer");
+        equal(1, n.events.length, "Event captured through the platform");
+        equal(null, n.events[0].environment, "Platform fills environment");
+        equal(null, n.events[0].release, "Platform fills release");
+        equal(0, n.events[0].breadcrumbs.length, "beforeSend breadcrumb reaches the event once, through the platform scope");
+        equal(6, n.count("addBreadcrumb"), "beforeSend breadcrumb forwarded");
+        var tagCalls = n.count("setTag");
+        c.withScope(function(s) {
+            s.setTag("room", "inside");
+            c.captureMessage("inner");
+        });
+        equal(tagCalls, n.count("setTag"), "Local scope stays out of the platform scope");
+        equal("inside", n.events[1].tags.room, "Local scope applied to its event");
+        equal(1, n.events[1].breadcrumbs.length, "Local beforeSend breadcrumb kept on its event");
+        equal(6, n.count("addBreadcrumb"), "Local breadcrumb not forwarded");
+        check(c.scope.isNative(), "Platform scope restored");
+        c.scope.setContext("game", {nested: {name: "first"}});
+        c.scope.setContext("game", null);
+        equal(1, n.count("setContext"), "Context forwarded");
+        equal(1, n.count("removeContext"), "Null context removes it");
+        c.scope.clear();
+        equal(1, n.count("clear"), "Clear forwarded");
+        equal(0, n.count("syncScope"), "Platform scope never resynced");
         c.close();
     }
     static function hooks():Void {
